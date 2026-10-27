@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reporting lines: org charts inferred from job titles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>window.d3 || document.write('<script src="vendor/d3.min.js"><\/script>')</script>
+<style>
+:root{
+  color-scheme: light;
+  --paper:#EBEFF3; --surface:#FFFFFF; --surface-2:#F5F7F9; --ink:#14202B; --muted:#5A6977; --faint:#8995A1; --line:#C8D2DB; --line-soft:#DDE4EA;
+  --edge:#1F4E79; --rollup:#A86A12; --unlinked:#7D8994; --ok:#2E7D4F; --bad:#C2352F; --focus:#2F6FD0; --shade:#F3ECDD; --shade-ink:#5B4A2A;
+  --sel:#DCE8F6;
+  --font:"IBM Plex Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --cond:"IBM Plex Sans Condensed", "Arial Narrow", "Roboto Condensed", "IBM Plex Sans", Arial, sans-serif;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --paper:#0E151B; --surface:#16202A; --surface-2:#1B2731; --ink:#E3EAF0; --muted:#9AAAB8; --faint:#6F7F8D; --line:#2E3C49; --line-soft:#24313C;
+    --edge:#86B7E8; --rollup:#E2A54A; --unlinked:#7E8D9A; --ok:#5CC48A; --bad:#F07A72; --focus:#7FB0FF; --shade:#2A2418; --shade-ink:#D9C49B; --sel:#203246;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#0E151B; --surface:#16202A; --surface-2:#1B2731; --ink:#E3EAF0; --muted:#9AAAB8; --faint:#6F7F8D; --line:#2E3C49; --line-soft:#24313C;
+  --edge:#86B7E8; --rollup:#E2A54A; --unlinked:#7E8D9A; --ok:#5CC48A; --bad:#F07A72; --focus:#7FB0FF; --shade:#2A2418; --shade-ink:#D9C49B; --sel:#203246;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%; scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0; height:100%; background:var(--paper); color:var(--ink); font:14px/1.5 var(--font); font-variant-numeric:tabular-nums; display:flex; flex-direction:column}
+button,input,select{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+a{color:var(--edge)}
+header.top{display:flex; align-items:baseline; gap:28px; padding:14px 22px 0; flex-wrap:wrap; border-bottom:1px solid var(--line); background:var(--paper)}
+.brand{display:flex; align-items:baseline; gap:10px; padding-bottom:12px}
+.brand h1{margin:0; font:600 19px/1.2 var(--font); letter-spacing:-0.01em}
+.brand span{color:var(--muted); font-size:13px}
+nav.tabs{display:flex; gap:4px; margin-left:auto}
+nav.tabs button{background:none; border:0; padding:8px 12px 11px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font-weight:500}
+nav.tabs button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--ink)}
+main{flex:1; min-height:0; display:flex}
+section.view{flex:1; min-height:0; display:flex}
+section.view[hidden]{display:none}
+
+/* ---------- chart view ---------- */
+#view-chart{position:relative}
+.controls{width:318px; flex:none; overflow:auto; padding:18px 18px 28px; border-right:1px solid var(--line); background:var(--surface)}
+.controls h2{font:600 13px/1.3 var(--font); margin:22px 0 8px; color:var(--ink)}
+.controls h2:first-child{margin-top:0}
+.picker{position:relative}
+.picker input{width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--surface)}
+.picker ul{position:absolute; z-index:20; left:0; right:0; top:100%; margin:4px 0 0; padding:4px; list-style:none; max-height:320px; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:6px; box-shadow:0 8px 24px rgba(10,20,30,.16)}
+.picker li{padding:6px 8px; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; gap:8px}
+.picker li small{color:var(--muted)}
+.picker li.count{cursor:default; color:var(--muted); font-size:12.5px; position:sticky; top:-4px; background:var(--surface); border-bottom:1px solid var(--line-soft); border-radius:0}
+.picker li.count:hover{background:var(--surface)}
+.picker li[aria-selected="true"], .picker li:hover{background:var(--sel)}
+.cmeta{margin-top:10px; color:var(--muted); font-size:13px}
+.cmeta b{color:var(--ink); font-weight:500}
+.split-tag{display:inline-block; font-size:12px; padding:0 6px; border-radius:3px; border:1px solid var(--line); color:var(--muted)}
+.slider-row{display:flex; align-items:center; gap:10px}
+.slider-row input[type=range]{flex:1; accent-color:var(--edge)}
+.slider-row output{font-weight:600; width:42px; text-align:right}
+.hint{color:var(--muted); font-size:12.5px; margin:6px 0 0}
+.switch{display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none}
+.switch input{width:36px; height:20px; flex:none; appearance:none; background:var(--line); border-radius:10px; position:relative; cursor:pointer; transition:background .15s}
+.switch input::after{content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--surface); transition:left .15s}
+.switch input:checked{background:var(--ok)}
+.switch input:checked::after{left:18px}
+.score{margin-top:10px; display:grid; grid-template-columns:1fr auto; gap:3px 12px; font-size:13px}
+.score dt{color:var(--muted)}
+.score dd{margin:0; text-align:right; font-weight:500}
+.ask{display:flex; gap:6px}
+.ask input{flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--surface)}
+.btn{border:1px solid var(--line); background:var(--surface-2); border-radius:6px; padding:7px 12px; cursor:pointer; font-weight:500}
+.btn:hover{border-color:var(--muted)}
+.chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+.chips button{border:1px dashed var(--line); background:none; border-radius:14px; padding:2px 10px; font-size:12.5px; cursor:pointer; color:var(--muted); text-align:left}
+.chips button:hover{color:var(--ink); border-color:var(--muted)}
+.answer{margin-top:10px; padding:10px 12px; background:var(--surface-2); border-left:3px solid var(--edge); border-radius:0 6px 6px 0; font-size:13.5px}
+.answer:empty{display:none}
+.answer .who{font-weight:600; cursor:pointer; text-decoration:underline; text-decoration-color:var(--line); text-underline-offset:3px}
+.answer .truth{margin-top:6px; font-size:12.5px}
+.legend{display:grid; grid-template-columns:44px 1fr; gap:8px 10px; align-items:center; font-size:12.5px; color:var(--muted)}
+.legend svg{display:block}
+
+.canvas{flex:1; min-width:0; position:relative; overflow:hidden; background:var(--paper)}
+.canvas svg{width:100%; height:100%; display:block; cursor:grab}
+.canvas svg:active{cursor:grabbing}
+.canvas-tools{position:absolute; top:12px; right:12px; display:flex; gap:6px; z-index:5}
+.canvas-tools .btn{background:var(--surface); font-size:13px; padding:5px 10px}
+.loading{position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); background:var(--paper)}
+.loading[hidden]{display:none}
+.node-box{fill:var(--surface); stroke:var(--line)}
+.node.sel .node-box{stroke:var(--focus); stroke-width:2}
+.node text, .row text, .group text{fill:var(--ink)}
+.node .t2, .row .t2, .group .t2{fill:var(--muted)}
+.node .badge, .group .badge{fill:var(--muted); font-size:11px}
+.row-box{fill:var(--surface); stroke:var(--line-soft)}
+.row.sel .row-box{stroke:var(--focus); stroke-width:1.5}
+.group-box{fill:var(--surface-2); stroke:var(--rollup); stroke-dasharray:5 4; stroke-width:1.4}
+.group-box.unl{stroke:var(--unlinked)}
+.group-box.ok{stroke:var(--ok)} .group-box.bad{stroke:var(--bad)}
+.node, .row, .group, .more{cursor:pointer}
+.more text{fill:var(--edge)}
+.ln{fill:none; stroke:var(--edge)}
+.ln.ok{stroke:var(--ok)} .ln.bad{stroke:var(--bad)}
+.ln.dash{stroke:var(--rollup); stroke-dasharray:5 4}
+.ln.dash.unl{stroke:var(--unlinked)}
+.ln.dash.ok{stroke:var(--ok)} .ln.dash.bad{stroke:var(--bad)}
+
+/* detail panel */
+aside.detail{width:400px; flex:none; overflow:auto; border-left:1px solid var(--line); background:var(--surface); padding:18px 20px 32px}
+aside.detail[hidden]{display:none}
+.detail .close{float:right; border:0; background:none; font-size:22px; line-height:1; cursor:pointer; color:var(--muted); padding:2px 6px}
+.detail h2{margin:0 0 2px; font:600 18px/1.3 var(--font)}
+.detail .sub{color:var(--muted); margin:0 0 12px}
+.detail h3{font:600 13px/1.3 var(--font); margin:20px 0 8px; padding-top:14px; border-top:1px solid var(--line-soft)}
+.kv{display:grid; grid-template-columns:110px 1fr; gap:3px 12px; font-size:13px; margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0; overflow-wrap:anywhere}
+.notes{margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--muted)}
+.why{font-size:13.5px}
+.why p{margin:0 0 6px}
+.reasons{display:flex; flex-wrap:wrap; gap:5px; margin:6px 0 0; padding:0; list-style:none}
+.reasons li{font-size:12px; border:1px solid var(--line); border-radius:3px; padding:0 6px; color:var(--muted)}
+.reasons li.neg{border-style:dashed}
+table.cands{width:100%; border-collapse:collapse; font-size:12.5px}
+table.cands td{padding:6px 4px; border-top:1px solid var(--line-soft); vertical-align:top}
+table.cands td.p{text-align:right; white-space:nowrap; width:56px}
+table.cands .bar{height:4px; background:var(--line-soft); border-radius:2px; margin-top:4px}
+table.cands .bar i{display:block; height:100%; background:var(--edge); border-radius:2px}
+table.cands tr.chosen td:first-child > .link{font-weight:600}
+.mark{font-size:11px; padding:0 5px; border-radius:3px; margin-left:4px; border:1px solid currentColor; font-weight:500; white-space:nowrap}
+.mark.ok{color:var(--ok)} .mark.bad{color:var(--bad)} .mark.pick{color:var(--edge)}
+ol.chain{margin:0; padding-left:20px; font-size:13px}
+ol.chain li{margin:2px 0}
+ol.chain .roll{color:var(--rollup)}
+.link{cursor:pointer; text-decoration:underline; text-decoration-color:var(--line); text-underline-offset:3px}
+.members{max-height:300px; overflow:auto; margin:0; padding:0; list-style:none; font-size:13px}
+.members li{padding:4px 0; border-top:1px solid var(--line-soft)}
+
+/* ---------- report views ---------- */
+.report{flex:1; overflow:auto; padding:28px 32px 60px}
+.report-inner{max-width:1080px}
+.report h2{font:600 24px/1.25 var(--font); margin:0 0 6px; letter-spacing:-0.01em}
+.report h3{font:600 16px/1.3 var(--font); margin:36px 0 6px}
+.report p.lede{color:var(--muted); max-width:72ch; margin:0 0 18px}
+.report p{max-width:72ch}
+.figs{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:14px 0}
+.fig{background:var(--surface); padding:14px 16px}
+.fig b{display:block; font:600 26px/1.15 var(--font)}
+.fig span{color:var(--muted); font-size:13px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:16px 18px}
+.card h4{margin:0 0 4px; font:600 14px/1.3 var(--font)}
+.card p{margin:0 0 10px; color:var(--muted); font-size:13px}
+.chart svg{width:100%; height:auto; display:block}
+.chart text{fill:var(--muted); font-size:11px; font-family:var(--font)}
+table.data{width:100%; border-collapse:collapse; font-size:13px; background:var(--surface)}
+table.data th, table.data td{padding:6px 10px; border-bottom:1px solid var(--line-soft); text-align:left; vertical-align:top}
+table.data th{font-weight:600; position:sticky; top:0; background:var(--surface-2); z-index:1}
+table.data td.n, table.data th.n{text-align:right; white-space:nowrap}
+table.data .hid{background:var(--shade); color:var(--shade-ink)}
+table.data th.hid{background:var(--shade)}
+.inbar{display:inline-block; vertical-align:middle; height:6px; background:var(--edge); border-radius:3px; margin-left:8px; opacity:.7}
+.tablewrap{overflow:auto; border:1px solid var(--line); border-radius:8px; max-height:620px}
+.seg{display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:8px 0 12px; flex-wrap:wrap}
+.seg button{border:0; background:var(--surface); padding:6px 12px; cursor:pointer; border-right:1px solid var(--line); font-size:13px}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink); color:var(--surface)}
+.qs{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px}
+.qs .card b{font:600 28px/1.1 var(--font); display:block; margin:6px 0 2px}
+.err{display:grid; grid-template-columns:minmax(200px,320px) 1fr 70px; gap:6px 14px; align-items:center; font-size:13px}
+.err .bar{height:10px; background:var(--bad); border-radius:2px; opacity:.75}
+details.ex{grid-column:1/-1; font-size:12.5px; color:var(--muted); margin:-2px 0 6px}
+details.ex summary{cursor:pointer}
+.filter{display:flex; gap:10px; align-items:center; margin:10px 0; flex-wrap:wrap}
+.filter input{padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--surface); width:260px; max-width:100%}
+.legend-shade{display:inline-block; width:14px; height:14px; background:var(--shade); border:1px solid var(--line); vertical-align:-2px; margin-right:6px}
+
+@media (max-width: 980px){
+  section.view#view-chart{display:block; overflow:auto}
+  .controls{width:auto; border-right:0; border-bottom:1px solid var(--line)}
+  .canvas{height:75vh}
+  aside.detail{position:fixed; inset:0; width:auto; z-index:50; padding-top:calc(18px + env(safe-area-inset-top,0px)); padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))}
+  .grid2{grid-template-columns:1fr}
+  .report{padding:20px 16px 60px}
+  nav.tabs{margin-left:0; overflow-x:auto}
+  .err{grid-template-columns:1fr 70px}
+  .err .bar{grid-column:1/-1; order:0}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>Reporting lines</h1><span>Org charts inferred from job titles</span></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="chart" aria-selected="true">Org charts</button>
+    <button role="tab" data-view="accuracy" aria-selected="false">How accurate is it</button>
+    <button role="tab" data-view="data" aria-selected="false">The data</button>
+  </nav>
+</header>
+<main>
+  <section class="view" id="view-chart">
+    <div class="controls">
+      <h2>Company</h2>
+      <div class="picker">
+        <input id="pick" type="text" autocomplete="off" placeholder="Search companies" aria-label="Search companies">
+        <ul id="pick-list" hidden role="listbox"></ul>
+      </div>
+      <div class="cmeta" id="cmeta"></div>
+
+      <h2>Ask about this company</h2>
+      <div class="ask"><input id="q" type="text" placeholder="who runs the data team?" aria-label="Question"><button class="btn" id="ask">Ask</button></div>
+      <div class="chips" id="chips"></div>
+      <div class="answer" id="answer"></div>
+
+      <h2>Confidence cut-off</h2>
+      <div class="slider-row"><input id="cut" type="range" min="0" max="49" step="1" aria-label="Confidence cut-off"><output id="cutv"></output></div>
+      <p class="hint" id="cut-hint"></p>
+
+      <h2>Check against truth</h2>
+      <label class="switch"><input type="checkbox" id="truth"> Colour lines by the hidden real org chart</label>
+      <dl class="score" id="score" hidden></dl>
+
+      <h2>Reading the chart</h2>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="canvas" id="canvas">
+      <div class="canvas-tools">
+        <button class="btn" id="expand">Expand all</button>
+        <button class="btn" id="collapse">Collapse</button>
+        <button class="btn" id="fit">Fit</button>
+      </div>
+      <svg id="svg" role="img" aria-label="Inferred org chart"><g id="vp"></g></svg>
+      <div class="loading" id="loading">Loading…</div>
+    </div>
+    <aside class="detail" id="detail" hidden aria-live="polite"></aside>
+  </section>
+
+  <section class="view" id="view-accuracy" hidden><div class="report"><div class="report-inner" id="acc"></div></div></section>
+  <section class="view" id="view-data" hidden><div class="report"><div class="report-inner" id="dat"></div></div></section>
+</main>
+
+<script id="meta" type="text/plain">__META__</script>
+<script id="companies" type="application/json">__COMPANIES__</script>
+<script>
+"use strict";
+// ---------------------------------------------------------------- data
+const FN = {engineering:"Engineering", data:"Data", security:"Security", it:"IT", product:"Product", design:"Design", sales:"Sales",
+  cs:"Customer success", marketing:"Marketing", finance:"Finance", hr:"People / HR", legal:"Legal", ops:"Operations", clinical:"Clinical",
+  research:"Research", editorial:"Editorial", executive:"Executive office"};
+const CODE_TEXT = {C:["Is the CEO",1], F:["Same function",1], P:["Leads a function that often owns theirs",1], G:["Nearest level above them",1],
+  T:["Same team",1], X:["Different team",0], R:["Same region",1], r:["Different region",0], L:["Same office",1], l:["Different office",0],
+  S:["Would have an unusually wide span",0], E:["Same level as them",0], H:["They lead their own function",1], Z:["Unrelated function",0]};
+const SPLIT = {"train-fit":"Training company (model fit)", "train-calibrate":"Training company (calibration)", test:"Held-out company"};
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct = (x, d=0) => { if (x == null) return "–"; const v = 100*x; if (v < 100 && +v.toFixed(d) >= 100) return (d ? (100 - Math.pow(10,-d)).toFixed(d) : "99") + "%"; return v.toFixed(d) + "%"; };
+const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+async function gunzipB64(b64){
+  const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const ds = new DecompressionStream("gzip");
+  const txt = await new Response(new Blob([bin]).stream().pipeThrough(ds)).text();
+  return JSON.parse(txt);
+}
+let META, BLOBS, GRID, DEFAULT_GI;
+const cache = new Map();
+const S = {cur:null, gi:0, truth:false, sel:null, selGroup:null, collapsed:new Set(), openLists:new Set(), layout:null, view:"chart"};
+
+// ---------------------------------------------------------------- placement at a cut-off
+function stateAt(C, gi){
+  const n = C.rows.length, kind = new Int8Array(n), tgt = new Int32Array(n), conf = new Float32Array(n);
+  for (let i=0;i<n;i++){
+    const seq = C.pl[i]; let e = seq[0];
+    for (const s of seq){ if (s[0] <= gi) e = s; else break; }
+    kind[i]=e[1]; tgt[i]=e[2]; conf[i]=e[3] ?? 0;
+  }
+  const parent = new Int32Array(n).fill(-1);
+  for (let i=0;i<n;i++) if (kind[i]===1 || kind[i]===2) parent[i]=tgt[i];
+  return {kind, tgt, conf, parent};
+}
+function ancestors(i, parent){ const out=[]; let j=parent[i]; let k=0; while (j>=0 && k++<40){ out.push(j); j=parent[j]; } return out; }
+function trueAnc(C, i){ const out=[]; let j=C.truth[i][0]; let k=0; while(j>=0 && k++<40){ out.push(j); j=C.truth[j][0]; } return out; }
+const lvl = (C,i) => C.parsed[i][1];
+const nm = (C,i) => C.rows[i][0] || "(no name)";
+const ttl = (C,i) => C.rows[i][1] || "(no title)";
+function isCorrect(C, st, i){
+  if (st.kind[i]===1) return st.tgt[i] === C.truth[i][0];
+  if (st.kind[i]===2) return trueAnc(C,i).includes(st.tgt[i]);
+  return null;
+}
+function economicBuyer(C, st, i){
+  for (const j of ancestors(i, st.parent)){ const l = lvl(C,j); if (l != null && l <= 2) return j; }
+  return -1;
+}
+function trueBuyer(C, i){
+  for (const j of trueAnc(C,i)) if (["CEO","C-level","SVP","VP"].includes(C.truth[j][3])) return j;
+  return -1;
+}
+function whoRuns(C, st, func, team){
+  const pool=[]; for (let i=0;i<C.rows.length;i++){ const p=C.parsed[i]; if (p[1]==null || i===C.ceo) continue;
+    if ((func && p[3]===func) || (team && p[4].split("|").includes(team))) pool.push(i); }
+  if (!pool.length) return {i:-1, how:"nobody"};
+  const best = Math.min(...pool.map(i=>lvl(C,i)));
+  const top = pool.filter(i=>lvl(C,i)===best);
+  if (top.length===1) return {i:top[0], how:"unique", pool};
+  for (const i of top) if (top.every(j => j===i || ancestors(j, st.parent).includes(i))) return {i, how:"ancestor", pool};
+  return {i:-1, how:"tie", top, pool};
+}
+function truthRuns(C, func, team){
+  const pool=[]; for (let i=0;i<C.rows.length;i++){ if (i===C.ceo) continue; const t=C.truth[i];
+    if ((func && t[1]===func) || (team && t[2].toLowerCase()===team)) pool.push(i); }
+  const set=new Set(pool); const tops=pool.filter(i=>C.truth[i][0]<0 || !set.has(C.truth[i][0]));
+  return tops.length===1 ? tops[0] : -1;
+}
+
+// ---------------------------------------------------------------- display tree
+function buildTree(C, st){
+  const n=C.rows.length, kids=Array.from({length:n},()=>[]);
+  const groups=new Map();
+  const root = C.ceo != null && C.ceo >= 0 ? C.ceo : -1;
+  for (let i=0;i<n;i++){
+    if (i===root) continue;
+    const k=st.kind[i];
+    if (k===1) kids[st.tgt[i]].push({type:"person", i, conf:st.conf[i], link:"edge"});
+    else if (k===2){ const key="r"+st.tgt[i]; if(!groups.has(key)) groups.set(key,{type:"rollup", key, at:st.tgt[i], members:[]}); groups.get(key).members.push(i); }
+    else { const key="u"+st.tgt[i]; if(!groups.has(key)) groups.set(key,{type:"unlinked", key, reason:st.tgt[i], members:[]}); groups.get(key).members.push(i); }
+  }
+  const rollAt = new Map();
+  for (const g of groups.values()) if (g.type==="rollup") rollAt.set(g.at, g);
+  const unl = [...groups.values()].filter(g=>g.type==="unlinked").sort((a,b)=>a.reason-b.reason);
+  const byLevel = (a,b) => (lvl(C,a)??9)-(lvl(C,b)??9) || nm(C,a).localeCompare(nm(C,b));
+  function mk(item, depth){
+    const node = Object.assign({}, item, {depth, kids:[]});
+    if (node.type==="person"){
+      const ks = kids[node.i].slice().sort((a,b)=>byLevel(a.i,b.i));
+      for (const k of ks) node.kids.push(mk(k, depth+1));
+      if (rollAt.has(node.i)) node.kids.push(mk(rollAt.get(node.i), depth+1));
+      if (node.i===root) for (const g of unl) node.kids.push(mk(g, depth+1));
+    } else if (node.type==="rollup" || node.type==="unlinked"){
+      node.leafs=[];
+      for (const m of node.members.slice().sort(byLevel)){
+        const child = mk({type:"person", i:m, link: node.type==="rollup"?"rollmember":"unlmember", conf:st.conf[m]}, depth+1);
+        if (child.kids.length) node.kids.push(child); else node.leafs.push(child);
+      }
+    } else if (node.type==="virtual"){
+      for (const g of unl) node.kids.push(mk(g, depth+1));
+    }
+    return node;
+  }
+  const rootNode = root>=0 ? {type:"person", i:root, link:"root"} : {type:"virtual"};
+  return {tree: mk(rootNode, 0)};
+}
+function countReports(node){ let c=0; for (const k of node.kids) c+=1+countReports(k); if (node.leafs) c+=node.leafs.length; return c; }
+
+// ---------------------------------------------------------------- layout
+const W=196, H=50, GH=44, ROW=25, GAP=22, VGAP=46, LIST_LIMIT=8;
+function nodeId(n){ return n.type==="person" ? "p"+n.i : n.type==="virtual" ? "v" : "g"+n.key; }
+function layoutTree(tree){
+  const all=[];
+  function measure(n){
+    const id=nodeId(n); n.id=id;
+    let leafs, inner;
+    if (n.type==="person"){ leafs = n.kids.filter(k=>k.type==="person" && k.kids.length===0); inner = n.kids.filter(k=>!(k.type==="person" && k.kids.length===0)); }
+    else if (n.type==="virtual"){ leafs=[]; inner=n.kids; }
+    else { leafs = n.leafs || []; inner = n.kids; }
+    n.hasKids = leafs.length + inner.length > 0;
+    if (S.collapsed.has(id)){ leafs=[]; inner=[]; }
+    n.vInner = inner;
+    const open = S.openLists.has(id);
+    n.shownLeafs = (open || leafs.length <= LIST_LIMIT+1) ? leafs : leafs.slice(0, LIST_LIMIT);
+    n.more = leafs.length - n.shownLeafs.length;
+    n.bh = (n.type==="person"||n.type==="virtual") ? H : GH;
+    n.stack = (n.shownLeafs.length + (n.more>0?1:0)) * ROW + ((n.shownLeafs.length||n.more)? 8:0);
+    inner.forEach(measure);
+    n.kidsW = inner.reduce((s,k)=>s+k.w,0) + Math.max(0, inner.length-1)*GAP;
+    n.w = Math.max(W, n.kidsW);
+  }
+  function place(n, x0, y){
+    n.x = x0 + (n.w - W)/2; n.y = y; all.push(n);
+    let cx = x0 + (n.w - n.kidsW)/2;
+    const ky = y + n.bh + n.stack + VGAP;
+    for (const k of n.vInner){ place(k, cx, ky); cx += k.w + GAP; }
+  }
+  measure(tree); place(tree, 0, 0);
+  return all;
+}
+
+// ---------------------------------------------------------------- render
+function strokeW(conf){ const c = GRID[S.gi]; const t = Math.max(0, Math.min(1, (conf - c) / Math.max(0.02, 1 - c))); return (1.2 + 3.6*t).toFixed(2); }
+function trunc(s, n){ s = String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+function groupOk(C, st, g){ return g.members.every(m=>isCorrect(C,st,m)); }
+function render(){
+  const C=S.cur; if(!C) return;
+  const st = S.st;
+  const all = layoutTree(S.treeInfo.tree);
+  S.layout = all;
+  const lines = [], boxes = [];
+  const edgeCls = (i) => { let cls="ln"; if (S.truth){ const ok=isCorrect(C, st, i); if (ok!==null) cls += ok?" ok":" bad"; } return cls; };
+  for (const n of all){
+    const bx = n.x + W/2, by = n.y + n.bh;
+    const spineX = n.x + 12;
+    const inGroup = n.type==="rollup" || n.type==="unlinked";
+    const groupCls = n.type==="unlinked" ? "ln dash unl" : ("ln dash" + (S.truth && n.type==="rollup" ? "" : ""));
+    n.shownLeafs.forEach((lf, k) => {
+      const ry = n.y + n.bh + 8 + k*ROW;
+      let cls, sw = "1.3";
+      if (inGroup){ cls = groupCls; if (S.truth && n.type==="rollup") cls += isCorrect(C,st,lf.i) ? " ok":" bad"; }
+      else { cls = edgeCls(lf.i); sw = strokeW(lf.conf); }
+      lines.push(`<path class="${cls}" stroke-width="${sw}" d="M${spineX},${n.y+n.bh} V${ry+ROW/2-2} H${spineX+12}"/>`);
+      const sel = S.sel===lf.i ? " sel":"";
+      boxes.push(`<g class="row${sel}" data-p="${lf.i}"><rect class="row-box" x="${spineX+12}" y="${ry+1}" width="${W-24}" height="${ROW-4}" rx="2"/>`+
+        `<text x="${spineX+19}" y="${ry+ROW/2+3}" font-size="11.5" style="font-family:var(--cond)"><tspan font-weight="600">${esc(trunc(nm(C,lf.i),19))}</tspan><tspan class="t2" dx="6">${esc(trunc(ttl(C,lf.i),Math.max(6, 40-Math.min(19,nm(C,lf.i).length))))}</tspan></text></g>`);
+    });
+    if (n.more>0){
+      const ry = n.y + n.bh + 8 + n.shownLeafs.length*ROW;
+      lines.push(`<path class="ln${inGroup?" dash":""}" stroke-width="1" stroke-dasharray="2 3" d="M${spineX},${n.y+n.bh} V${ry+ROW/2-2} H${spineX+12}"/>`);
+      boxes.push(`<g class="more" data-more="${n.id}" role="button"><rect x="${spineX+12}" y="${ry+1}" width="${W-24}" height="${ROW-4}" fill="transparent"/><text x="${spineX+19}" y="${ry+ROW/2+3}" font-size="12">Show ${n.more} more</text></g>`);
+    }
+    for (const k of n.vInner){
+      const kx = k.x + W/2, ky = k.y, busY = ky - VGAP/2;
+      let cls, sw="1.4";
+      if (k.type==="rollup"){ cls="ln dash"; if (S.truth) cls += groupOk(C,st,k)?" ok":" bad"; }
+      else if (k.type==="unlinked"){ cls="ln dash unl"; }
+      else if (inGroup){ cls = groupCls; if (S.truth && n.type==="rollup") cls += isCorrect(C,st,k.i)?" ok":" bad"; }
+      else { cls = edgeCls(k.i); sw = strokeW(k.conf); }
+      lines.push(`<path class="${cls}" stroke-width="${sw}" d="M${bx},${by+n.stack} V${busY} H${kx} V${ky}"/>`);
+    }
+    if (n.type==="person"){
+      const sel = S.sel===n.i ? " sel":"";
+      boxes.push(`<g class="node${sel}" data-p="${n.i}"><rect class="node-box" x="${n.x}" y="${n.y}" width="${W}" height="${H}" rx="4"/>`+
+        `<text x="${n.x+10}" y="${n.y+20}" font-size="13" font-weight="600">${esc(trunc(nm(C,n.i), n.hasKids?19:23))}</text>`+
+        `<text class="t2" x="${n.x+10}" y="${n.y+37}" font-size="11.5" style="font-family:var(--cond)">${esc(trunc(ttl(C,n.i),31))}</text>`+
+        (n.hasKids ? `<text class="badge" data-tog="${n.id}" x="${n.x+W-8}" y="${n.y+17}" text-anchor="end">${S.collapsed.has(n.id)?"▸":"▾"} ${countReports(n)}</text>` : "")+`</g>`);
+    } else if (n.type==="virtual"){
+      boxes.push(`<g class="node"><rect class="node-box" x="${n.x}" y="${n.y}" width="${W}" height="${H}" rx="4"/><text x="${n.x+10}" y="${n.y+29}" font-size="13">No CEO found on the list</text></g>`);
+    } else {
+      const unl = n.type==="unlinked";
+      let cls = "group-box" + (unl?" unl":"");
+      if (S.truth && !unl) cls += groupOk(C,st,n) ? " ok":" bad";
+      const label = unl ? `${n.members.length} unlinked` : `${n.members.length} ${n.members.length===1?"person rolls":"people roll"} up here`;
+      const sub = unl ? META.reasons[n.reason] : "Direct manager can’t be told apart";
+      boxes.push(`<g class="group${S.selGroup===n.id?" sel":""}" data-g="${n.id}"><rect class="${cls}" x="${n.x}" y="${n.y}" width="${W}" height="${GH}" rx="4"/>`+
+        `<text x="${n.x+10}" y="${n.y+18}" font-size="12.5" font-weight="600">${esc(label)}</text>`+
+        `<text class="t2" x="${n.x+10}" y="${n.y+34}" font-size="11" style="font-family:var(--cond)">${esc(trunc(sub,34))}</text>`+
+        `<text class="badge" data-tog="${n.id}" x="${n.x+W-8}" y="${n.y+17}" text-anchor="end">${S.collapsed.has(n.id)?"▸":"▾"}</text></g>`);
+    }
+  }
+  document.getElementById("vp").innerHTML = lines.join("") + boxes.join("");
+}
+
+// ---------------------------------------------------------------- zoom
+let zoom, svgSel;
+function setupZoom(){
+  svgSel = d3.select("#svg");
+  zoom = d3.zoom().scaleExtent([0.05, 2.2]).on("zoom", e => d3.select("#vp").attr("transform", e.transform));
+  svgSel.call(zoom).on("dblclick.zoom", null);
+}
+function fit(initial){
+  const el = document.getElementById("canvas"); const w = el.clientWidth, h = el.clientHeight;
+  if (!S.layout || !S.layout.length || !w) return;
+  let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+  for (const n of S.layout){ minX=Math.min(minX,n.x); maxX=Math.max(maxX,n.x+W); minY=Math.min(minY,n.y); maxY=Math.max(maxY,n.y+n.bh+n.stack); }
+  let k = Math.min(1, (w-40)/(maxX-minX), (h-70)/(maxY-minY));
+  let tx = (w - (maxX-minX)*k)/2 - minX*k, ty = 56 - minY*k;
+  if (initial && k < 0.6){ // too small to read: start readable, centred on the CEO
+    k = 0.6; const root = S.layout[0]; tx = w/2 - (root.x + W/2)*k; ty = 56 - root.y*k;
+  }
+  svgSel.transition().duration(reduced()?0:350).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+}
+function centerOn(i){
+  let x, y;
+  const n = S.layout.find(n=>n.type==="person" && n.i===i);
+  if (n){ x = n.x + W/2; y = n.y + H/2; }
+  else for (const p of S.layout){ const k = p.shownLeafs.findIndex(l=>l.i===i); if (k>=0){ x=p.x+W/2; y=p.y+p.bh+8+k*ROW; break; } }
+  if (x==null) return;
+  const el = document.getElementById("canvas");
+  const k = Math.max(0.75, d3.zoomTransform(svgSel.node()).k);
+  svgSel.transition().duration(reduced()?0:400).call(zoom.transform, d3.zoomIdentity.translate(el.clientWidth/2 - x*k, el.clientHeight/3 - y*k).scale(k));
+}
+
+// ---------------------------------------------------------------- company load
+async function loadCompany(id){
+  document.getElementById("loading").hidden = false;
+  let C = cache.get(id);
+  if (!C){ C = await gunzipB64(BLOBS[id]); cache.set(id, C); }
+  S.cur = C; S.meta = META.index.find(c=>c.id===id); S.sel=null; S.selGroup=null;
+  document.getElementById("pick").value = S.meta.name;
+  const m = S.meta;
+  document.getElementById("cmeta").innerHTML = `<b>${esc(m.industry)}</b>, ${m.n} people on the list<br>${esc(m.offices.join(", "))}<br><span class="split-tag">${SPLIT[m.split]}</span>`;
+  if (location.hash.slice(1) !== id && S.view==="chart") history.replaceState(null, "", "#"+id);
+  document.getElementById("answer").innerHTML = "";
+  setChips();
+  closeDetail();
+  recompute(true);
+  document.getElementById("loading").hidden = true;
+  if (S.view==="data"){ dataAll=false; renderData(); }
+}
+function recompute(resetCollapse){
+  const C=S.cur; S.st = stateAt(C, S.gi); S.treeInfo = buildTree(C, S.st);
+  if (resetCollapse){
+    S.collapsed = new Set(); S.openLists = new Set();
+    (function walk(n){ const id=nodeId(n);
+      if ((n.depth>=2 && n.type==="person" && n.kids.length) || n.type==="unlinked" || (n.type==="rollup" && n.depth>=3)) S.collapsed.add(id);
+      for (const k of n.kids) walk(k); })(S.treeInfo.tree);
+  }
+  render(); updateScore();
+  if (resetCollapse) fit(true);
+  if (S.sel!=null) showPerson(S.sel, false);
+  else if (S.selGroup) showGroup(S.selGroup);
+}
+function expandTo(i){
+  const st=S.st; const chain=[i, ...ancestors(i, st.parent)];
+  for (const j of chain){
+    S.collapsed.delete("p"+j);
+    if (st.kind[j]===2){ S.collapsed.delete("gr"+st.tgt[j]); S.openLists.add("gr"+st.tgt[j]); }
+    if (st.kind[j]===3){ S.collapsed.delete("gu"+st.tgt[j]); S.openLists.add("gu"+st.tgt[j]); }
+    if (st.parent[j]>=0) S.openLists.add("p"+st.parent[j]);
+  }
+}
+function focusPerson(i){ expandTo(i); S.sel=i; render(); centerOn(i); showPerson(i, true); }
+
+// ---------------------------------------------------------------- score
+function updateScore(){
+  const el=document.getElementById("score");
+  if (!S.truth){ el.hidden=true; return; }
+  const C=S.cur, st=S.st; let ppl=0,e=0,ec=0,r=0,rc=0,u=0;
+  for (let i=0;i<C.rows.length;i++){ if (i===C.ceo) continue; ppl++;
+    if (st.kind[i]===1){ e++; if (st.tgt[i]===C.truth[i][0]) ec++; }
+    else if (st.kind[i]===2){ r++; if (trueAnc(C,i).includes(st.tgt[i])) rc++; }
+    else u++; }
+  el.hidden=false;
+  el.innerHTML = `<dt>Lines drawn</dt><dd>${e} of ${ppl} (${pct(e/ppl)})</dd><dt>Lines correct</dt><dd>${ec} (${pct(e?ec/e:null,1)})</dd>`+
+    `<dt>Rolled up</dt><dd>${r} (${pct(r/ppl)})</dd><dt>Under a true leader</dt><dd>${rc} (${pct(r?rc/r:null,1)})</dd><dt>Unlinked</dt><dd>${u} (${pct(u/ppl)})</dd>`;
+}
+
+// ---------------------------------------------------------------- detail panel
+function closeDetail(){ document.getElementById("detail").hidden = true; S.sel=null; S.selGroup=null; }
+function personLink(i){ return `<span class="link" data-goto="${i}" tabindex="0">${esc(nm(S.cur,i))}</span>`; }
+function reasonList(codes){
+  return `<ul class="reasons">${[...codes].map(c=>CODE_TEXT[c] ? `<li class="${CODE_TEXT[c][1]?"":"neg"}">${CODE_TEXT[c][0]}</li>` : "").join("")}</ul>`;
+}
+function showPerson(i, scroll){
+  const C=S.cur, st=S.st, el=document.getElementById("detail");
+  S.sel=i; S.selGroup=null;
+  const r=C.rows[i], p=C.parsed[i], t=C.truth[i];
+  const src = {title:"title", "title+department":"title and department", department:"department only"}[p[7]] || "";
+  const funcTxt = p[3] ? `${esc(FN[p[3]]||p[3])} <span style="color:var(--muted)">(from ${src})</span>` : "Unknown";
+  let html = `<button class="close" aria-label="Close" data-close>×</button><h2>${esc(nm(C,i))}</h2><p class="sub">${esc(r[1]||"No title")}</p>`;
+  html += `<dl class="kv"><dt>Department</dt><dd>${esc(r[2]||"–")}</dd><dt>Location</dt><dd>${esc(r[3]||"–")}</dd><dt>Started</dt><dd>${esc(r[4]||"–")}</dd></dl>`;
+  html += `<h3>How the record was read</h3><dl class="kv"><dt>Cleaned title</dt><dd>${esc(p[0]||"–")}</dd><dt>Seniority</dt><dd>${esc(p[2])}</dd>`+
+    `<dt>Function</dt><dd>${funcTxt}</dd><dt>Team</dt><dd>${esc(p[4] ? p[4].split("|").join(", ") : "Not stated")}</dd><dt>Region</dt><dd>${esc(p[5]||"–")}</dd></dl>`;
+  if (p[6]) html += `<ul class="notes">${p[6].split("\n").map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
+  html += `<h3>Why they sit here</h3><div class="why">`;
+  const cands = C.cands[i];
+  const k = st.kind[i];
+  if (k===0) html += `<p>Read as the CEO, so they sit at the top.</p>`;
+  else if (k===1){
+    const c0 = cands.find(c=>c[0]===st.tgt[i]);
+    html += `<p>Reports to ${personLink(st.tgt[i])}, ${esc(ttl(C,st.tgt[i]))}, with ${pct(st.conf[i])} confidence (cut-off ${pct(GRID[S.gi])}).</p>`;
+    if (c0) html += reasonList(c0[2]);
+  } else if (k===2){
+    html += `<p>No single manager clears the ${pct(GRID[S.gi])} cut-off (best guess ${pct(C.conf1[i])}). Together the likeliest managers reach ${pct(st.conf[i])}, and they all sit under ${personLink(st.tgt[i])}, so this person rolls up there.</p>`;
+  } else {
+    const why = META.reasons[st.tgt[i]];
+    html += `<p>Left unlinked: ${esc(why.toLowerCase())}.` + (cands.length ? ` The best single guess reaches ${pct(C.conf1[i])}, below the ${pct(GRID[S.gi])} cut-off, and no leader sits above all the plausible managers except the CEO.` : "") + `</p>`;
+  }
+  if (S.truth && k!==0){
+    const ok = isCorrect(C, st, i), tm = t[0];
+    html += `<p style="margin-top:8px">Real manager: ${tm>=0 ? personLink(tm)+", "+esc(C.truth[tm][4]) : "none"}`+
+      (ok===null ? "" : ` <span class="mark ${ok?"ok":"bad"}">${k===1?(ok?"line correct":"line wrong"):(ok?"right branch":"wrong branch")}</span>`)+`</p>`;
+  }
+  html += `</div>`;
+  if (cands.length){
+    html += `<h3>Managers considered</h3><table class="cands">`;
+    for (const [j, pr, codes] of cands){
+      const chosen = k===1 && st.tgt[i]===j;
+      const real = S.truth && C.truth[i][0]===j;
+      html += `<tr class="${chosen?"chosen":""}"><td>${personLink(j)}${chosen?'<span class="mark pick">picked</span>':""}${real?'<span class="mark ok">real</span>':""}<br><span style="color:var(--muted)">${esc(ttl(C,j))}</span>${reasonList(codes)}</td>`+
+        `<td class="p">${pct(pr)}<div class="bar"><i style="width:${(pr*100).toFixed(1)}%"></i></div></td></tr>`;
+    }
+    html += `</table><p class="hint">How the model split its belief across the top candidates, before calibration.</p>`;
+  } else if (k!==0){
+    html += `<h3>Managers considered</h3><p class="why">None: ${p[1]==null ? "with no title there is no seniority to compare." : "nobody above them could be found."}</p>`;
+  }
+  const anc = ancestors(i, st.parent);
+  html += `<h3>Chain of command</h3>`;
+  if (k===0) html += `<p class="why">Top of the company.</p>`;
+  else {
+    html += `<ol class="chain"><li>${esc(nm(C,i))}, ${esc(ttl(C,i))}</li>`;
+    let prev=i;
+    for (const j of anc){ const roll = st.kind[prev]===2; html += `<li class="${roll?"roll":""}">${roll?"rolls up under ":""}${personLink(j)}, ${esc(ttl(C,j))}</li>`; prev=j; }
+    if (st.kind[prev]===3) html += `<li style="color:var(--muted)">Chain stops: ${esc(META.reasons[st.tgt[prev]].toLowerCase())}</li>`;
+    html += `</ol>`;
+  }
+  const b = economicBuyer(C, st, i);
+  html += `<h3>Likely economic buyer</h3><div class="why">`;
+  if (k===0) html += `<p>They are the top of the company.</p>`;
+  else if (b>=0) html += `<p>${personLink(b)}, ${esc(ttl(C,b))}: the nearest leader at VP level or above in their chain.</p>`;
+  else html += `<p>Can’t tell. The chain breaks before reaching anyone at VP level or above.</p>`;
+  if (S.truth && k!==0){ const tb=trueBuyer(C,i); html += `<p class="hint">Real: ${tb>=0? esc(nm(C,tb))+", "+esc(C.truth[tb][4]) : "none above them"}${b>=0? (tb===b?' <span class="mark ok">match</span>':' <span class="mark bad">different</span>'):""}</p>`; }
+  html += `</div>`;
+  el.innerHTML = html; el.hidden=false; if (scroll) el.scrollTop=0;
+  render();
+}
+function findNode(n, id){ if (nodeId(n)===id) return n; for (const k of n.kids){ const r=findNode(k, id); if (r) return r; } return null; }
+function showGroup(id){
+  const C=S.cur, st=S.st, el=document.getElementById("detail");
+  const g = findNode(S.treeInfo.tree, id);
+  if (!g){ closeDetail(); return; }
+  S.selGroup=id; S.sel=null;
+  let html = `<button class="close" aria-label="Close" data-close>×</button>`;
+  if (g.type==="rollup"){
+    html += `<h2>${g.members.length} ${g.members.length===1?"person rolls":"people roll"} up under ${esc(nm(C,g.at))}</h2><p class="sub">${esc(ttl(C,g.at))}</p>`;
+    html += `<p class="why">Each person here has several plausible direct managers that the titles can’t tell apart. All of those managers sit under ${personLink(g.at)}, so that is as precise as the data allows.</p>`;
+    const cand = new Map();
+    for (const m of g.members) for (const [j,pr] of C.cands[m].slice(0,4)) if (pr>0.08 && j!==g.at) cand.set(j,(cand.get(j)||0)+1);
+    if (cand.size) html += `<h3>Plausible direct managers in this branch</h3><ul class="members">${[...cand.entries()].sort((a,b)=>b[1]-a[1]).slice(0,12).map(([j,c])=>`<li>${personLink(j)}, ${esc(ttl(C,j))} <span style="color:var(--muted)">(candidate for ${c})</span></li>`).join("")}</ul>`;
+    if (S.truth){ const ok = g.members.filter(m=>isCorrect(C,st,m)).length; html += `<p class="hint">${ok} of ${g.members.length} really sit under ${esc(nm(C,g.at))}.</p>`; }
+  } else {
+    html += `<h2>${g.members.length} unlinked</h2><p class="sub">${esc(META.reasons[g.reason])}</p>`;
+  }
+  html += `<h3>People</h3><ul class="members">${g.members.map(m=>{ let mk=""; if (S.truth && g.type==="rollup"){ const ok=isCorrect(C,st,m); mk=`<span class="mark ${ok?"ok":"bad"}">${ok?"right branch":"wrong branch"}</span>`;} return `<li>${personLink(m)}, ${esc(ttl(C,m))} ${mk}</li>`; }).join("")}</ul>`;
+  el.innerHTML = html; el.hidden=false; el.scrollTop=0;
+  render();
+}
+
+// ---------------------------------------------------------------- questions
+const FUNC_WORDS = [["engineering","engineering"],["eng","engineering"],["tech","engineering"],["technology","engineering"],["data","data"],["security","security"],
+  ["infosec","security"],["information security","security"],["it","it"],["product","product"],["design","design"],["ux","design"],["sales","sales"],["revenue","sales"],
+  ["customer success","cs"],["cs","cs"],["customer","cs"],["marketing","marketing"],["finance","finance"],["people","hr"],["hr","hr"],["human resources","hr"],
+  ["legal","legal"],["operations","ops"],["ops","ops"],["clinical","clinical"],["research","research"],["r&d","research"],["editorial","editorial"],["newsroom","editorial"]];
+const TEAM_WORDS = ["platform","backend","frontend","mobile","infrastructure","qa","site reliability","payments","data engineering","analytics","data science",
+  "machine learning","business intelligence","security operations","application security","grc","identity & access","it support","corporate systems","core product",
+  "growth","platform product","product design","ux research","brand design","enterprise","mid-market","smb","sales development","sales operations",
+  "solutions engineering","support","onboarding","demand generation","content","product marketing","brand","events","accounting","fp&a","procurement","payroll",
+  "talent acquisition","people operations","learning & development","total rewards","commercial legal","compliance","business operations","supply chain",
+  "facilities","warehouse","fulfillment","quality","manufacturing","nursing","clinical operations","care management","discovery","translational","lab operations",
+  "news","features","video"];
+function resolveUnit(phrase){
+  phrase = phrase.toLowerCase().replace(/\b(the|team|teams|org|organisation|organization|function|department|group|at this company)\b/g," ").replace(/\s+/g," ").trim();
+  if (phrase==="recruiting") return {team:"talent acquisition", label:"talent acquisition"};
+  for (const [w,f] of FUNC_WORDS) if (phrase===w) return {func:f, label:FN[f]};
+  for (const t of TEAM_WORDS) if (phrase===t) return {team:t, label:t};
+  for (const t of [...TEAM_WORDS].sort((a,b)=>b.length-a.length)) if (t.length>3 && phrase.includes(t)) return {team:t, label:t};
+  for (const [w,f] of FUNC_WORDS) if (w.length>2 && phrase.includes(w)) return {func:f, label:FN[f]};
+  return null;
+}
+function findPeople(q){
+  const C=S.cur; q=q.toLowerCase().trim().replace(/[?.!]+$/,"");
+  const exact=[], part=[];
+  for (let i=0;i<C.rows.length;i++){ const n=(C.rows[i][0]||"").toLowerCase(); if (n===q) exact.push(i); else if (q.length>=3 && n.includes(q)) part.push(i); }
+  return exact.length ? exact : part;
+}
+function ask(qraw){
+  const C=S.cur, st=S.st, out=document.getElementById("answer");
+  const q = qraw.toLowerCase().trim().replace(/[?!.]+$/,"");
+  let m, html="";
+  const who = i => `<span class="who" data-goto="${i}" tabindex="0">${esc(nm(C,i))}</span>, ${esc(ttl(C,i))}`;
+  const mark = ok => ok ? ' <span class="mark ok">match</span>' : ' <span class="mark bad">different</span>';
+  if (!q){ out.innerHTML=""; return; }
+  if ((m = q.match(/(?:economic buyer|buyer|budget holder|decision maker)(?: is)?(?: above| for| over| of)?\s+(.+)$/))){
+    const ppl = findPeople(m[1]);
+    if (!ppl.length) html = `No one called “${esc(m[1])}” in ${esc(S.meta.name)}. Try a full or partial name from the chart.`;
+    else if (ppl.length>1) html = `Several people match: ${ppl.slice(0,8).map(who).join("; ")}. Click one, or ask with the full name.`;
+    else { const i=ppl[0], b=economicBuyer(C,st,i);
+      html = i===C.ceo ? `${who(i)} is the CEO, so nobody sits above them.` : b>=0 ? `The likely economic buyer above ${who(i)} is ${who(b)}: the nearest leader at VP level or above in their chain.` :
+        `Can’t name one for ${who(i)}: the chain breaks before reaching anyone at VP level or above.`;
+      if (S.truth && i!==C.ceo){ const tb=trueBuyer(C,i); html += `<div class="truth">Real: ${tb>=0?esc(nm(C,tb))+", "+esc(C.truth[tb][4]):"none"}${b>=0?mark(tb===b):""}</div>`; }
+    }
+  } else if ((m = q.match(/who does (?:the )?(.+?) report to$/)) || (m = q.match(/(?:manager|boss) of (?:the )?(.+)$/)) || (m = q.match(/who is (?:the )?(.+?)(?:'s|’s) (?:manager|boss)$/))){
+    let target=-1, unitTxt="";
+    const ppl = findPeople(m[1]);
+    if (ppl.length===1) target=ppl[0];
+    else {
+      const um = m[1].replace(/^(head|vp|vice president|director|chief|leader|lead|svp|boss)( of)?\s+/,"");
+      const u = resolveUnit(um);
+      if (u){ const r = whoRuns(C, st, u.func, u.team); unitTxt=u.label;
+        if (r.i<0) html = r.how==="nobody" ? `Nobody on the list reads as part of ${esc(u.label)}.` : `Can’t tell who leads ${esc(u.label)}: ${r.top.slice(0,4).map(who).join("; ")} share the same seniority and none sits above the others.`;
+        else target=r.i; }
+      else if (ppl.length>1) html = `Several people match: ${ppl.slice(0,8).map(who).join("; ")}.`;
+      else html = `I couldn’t match “${esc(m[1])}” to a person or a team.`;
+    }
+    if (target>=0){
+      const k=st.kind[target];
+      const lead = unitTxt ? `The ${esc(unitTxt)} leader is ${who(target)}. ` : "";
+      if (k===0) html = lead + `They are the CEO.`;
+      else if (k===1) html = lead + `They report to ${who(st.tgt[target])} (${pct(st.conf[target])} confidence).`;
+      else if (k===2) html = lead + `Their direct manager can’t be told apart from titles; they roll up under ${who(st.tgt[target])}.`;
+      else html = lead + `Their manager is unresolved: ${esc(META.reasons[st.tgt[target]].toLowerCase())}. The best guess, ${who(C.cands[target][0]?.[0] ?? target)}, is only ${pct(C.conf1[target])} likely.`;
+      if (S.truth){ const tm=C.truth[target][0]; html += `<div class="truth">Real manager: ${tm>=0?esc(nm(C,tm))+", "+esc(C.truth[tm][4]):"none"}${k===1?mark(tm===st.tgt[target]):""}</div>`; }
+    }
+  } else if ((m = q.match(/(?:who (?:runs|leads|heads|owns|manages)|head of|leader of|who is in charge of)\s+(?:the )?(.+)$/))){
+    const u = resolveUnit(m[1]);
+    if (!u) html = `I couldn’t match “${esc(m[1])}” to a function or team. Try data, security, sales, analytics or enterprise.`;
+    else { const r = whoRuns(C, st, u.func, u.team);
+      if (r.i>=0) html = `${who(r.i)} runs ${esc(u.label)}` + (r.how==="ancestor" ? `. Others share the title, but they sit under this person.` : `: the most senior person whose title reads as ${esc(u.label)}.`);
+      else if (r.how==="nobody") html = `Nobody on the list reads as part of ${esc(u.label)}.`;
+      else html = `Can’t pick one: ${r.top.slice(0,5).map(who).join("; ")} share the top title in ${esc(u.label)} and none sits above the others.`;
+      if (S.truth){ const tr = truthRuns(C, u.func, u.team); html += `<div class="truth">Real: ${tr>=0?esc(nm(C,tr))+", "+esc(C.truth[tr][4]):"no single leader"}${r.i>=0?mark(tr===r.i):""}</div>`; }
+    }
+  } else {
+    html = `Try “who runs the data team?”, “who does the head of security report to?” or “economic buyer above &lt;name&gt;”.`;
+  }
+  out.innerHTML = html;
+}
+function setChips(){
+  const C=S.cur; const el=document.getElementById("chips");
+  const funcs = new Set(C.parsed.map(p=>p[3]));
+  const opts = [];
+  opts.push(funcs.has("data") ? "who runs the data team?" : "who runs the engineering team?");
+  opts.push(funcs.has("security") ? "who does the head of security report to?" : "who does the head of marketing report to?");
+  let champ = -1;
+  for (let i=0;i<C.rows.length;i++){ const l=lvl(C,i); if (l!=null && l>=3 && l<=4 && C.rows[i][0] && /^[A-Z][a-z]/.test(C.rows[i][0]) && findPeople(C.rows[i][0]).length===1){ champ=i; break; } }
+  if (champ>=0) opts.push(`economic buyer above ${C.rows[champ][0]}`);
+  el.innerHTML = opts.map(o=>`<button type="button">${esc(o)}</button>`).join("");
+}
+
+// ---------------------------------------------------------------- accuracy view
+function svgLine({w=520,h=300,pad=[18,18,40,48], xs, ys, series, xLabel, yLabel, xDomain=[0,1], yDomain=[0,1], marker, diag, bars}){
+  const [pt,pr,pb,pl]=pad, iw=w-pl-pr, ih=h-pt-pb;
+  const X=v=>pl+(v-xDomain[0])/(xDomain[1]-xDomain[0])*iw, Y=v=>pt+ih-(Math.max(yDomain[0],v)-yDomain[0])/(yDomain[1]-yDomain[0])*ih;
+  let s=`<svg viewBox="0 0 ${w} ${h}" role="img">`;
+  for (const t of xs){ s+=`<line x1="${X(t)}" x2="${X(t)}" y1="${pt}" y2="${pt+ih}" stroke="var(--line-soft)"/><text x="${X(t)}" y="${pt+ih+16}" text-anchor="middle">${Math.round(t*100)}%</text>`; }
+  for (const t of ys){ s+=`<line x1="${pl}" x2="${pl+iw}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--line-soft)"/><text x="${pl-6}" y="${Y(t)+4}" text-anchor="end">${Math.round(t*100)}%</text>`; }
+  s+=`<text x="${pl+iw/2}" y="${h-4}" text-anchor="middle">${xLabel}</text><text transform="translate(12,${pt+ih/2}) rotate(-90)" text-anchor="middle">${yLabel}</text>`;
+  if (bars) for (const b of bars) s+=`<rect x="${X(b.x0)+1}" width="${Math.max(0,X(b.x1)-X(b.x0)-2)}" y="${pt+ih-b.h*ih*0.3}" height="${b.h*ih*0.3}" fill="var(--line)" opacity=".7"/>`;
+  if (diag) s+=`<line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(1)}" stroke="var(--faint)" stroke-dasharray="4 4"/>`;
+  for (const se of series){
+    const pts=se.pts.filter(p=>p[1]!=null);
+    s+=`<path d="${pts.map((p,k)=>(k?"L":"M")+X(p[0]).toFixed(1)+","+Y(p[1]).toFixed(1)).join("")}" fill="none" stroke="${se.color}" stroke-width="${se.w||2}" ${se.dash?'stroke-dasharray="5 4"':""}/>`;
+    if (se.dots) for (const p of pts) s+=`<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${se.r||3}" fill="${se.color}"/>`;
+  }
+  if (marker){ s+=`<circle cx="${X(marker[0])}" cy="${Y(marker[1])}" r="7" fill="none" stroke="var(--ink)" stroke-width="2"/><text x="${X(marker[0])+10}" y="${Y(marker[1])-12}" style="fill:var(--ink)">${marker[2]}</text>`; }
+  return s+`</svg>`;
+}
+let breakdownDim = null;
+function renderAccuracy(){
+  const M=META.metrics, h=M.headline, el=document.getElementById("acc");
+  const dc = M.default_cutoff;
+  let s = `<h2>How accurate is it</h2><p class="lede">Scored on ${M.n_test} held-out companies (${M.test_people.toLocaleString()} people) that played no part in fitting or calibrating the model. The default cut-off of ${pct(dc)} is the lowest setting that reached 95% line precision on the ${M.n_train} training companies.</p>`;
+  s += `<div class="figs"><div class="fig"><b>${pct(h.precision,1)}</b><span>of drawn lines are correct</span></div><div class="fig"><b>${pct(h.coverage,1)}</b><span>of people get a direct line</span></div>`+
+       `<div class="fig"><b>${pct(h.rollup_share,1)}</b><span>roll up to a leader instead</span></div><div class="fig"><b>${pct(h.rollup_accuracy,1)}</b><span>of those sit under a true leader</span></div>`+
+       `<div class="fig"><b>${pct(h.unlinked_share,1)}</b><span>left unlinked</span></div></div>`;
+  s += `<p>Training companies at the same cut-off: ${pct(M.train_at_default.precision,1)} of lines correct, ${pct(M.train_at_default.coverage,1)} of people with a line. ${pct(h.precision*h.coverage + h.rollup_share*h.rollup_accuracy,1)} of held-out people end up either on a correct line or inside a correct branch.</p>`;
+  const curve = M.curve, d = curve[M.default_index];
+  s += `<div class="grid2"><div class="card chart"><h4>Precision against coverage</h4><p>Each point is one cut-off from 50% to 99%. Moving right draws more lines; moving up makes them more often right.</p>`+
+    svgLine({xs:[0,.2,.4,.6,.8], ys:[.8,.85,.9,.95,1], xDomain:[0,.8], yDomain:[.8,1], xLabel:"Share of people with a drawn line", yLabel:"Lines correct",
+      series:[{pts:curve.map(c=>[c.train_coverage,c.train_precision]), color:"var(--faint)", dash:true, w:1.5}, {pts:curve.map(c=>[c.coverage,c.precision]), color:"var(--edge)", dots:true, r:2.5}],
+      marker:[d.coverage, d.precision, `default ${pct(dc)}`]}) +
+    `<p class="hint">Solid: held-out companies. Dashed: training companies.</p></div>`;
+  const cal = M.calibration, maxN = Math.max(...cal.map(b=>b.n));
+  s += `<div class="card chart"><h4>Calibration</h4><p>For each person’s best single guess: the stated confidence against how often it was right. Points on the diagonal mean the confidence can be taken at face value.</p>`+
+    svgLine({xs:[0,.2,.4,.6,.8,1], ys:[0,.2,.4,.6,.8,1], xLabel:"Stated confidence", yLabel:"Actually correct", diag:true,
+      bars: cal.map(b=>({x0:b.lo,x1:b.hi,h:b.n/maxN})),
+      series:[{pts:cal.filter(b=>b.n>20).map(b=>[(b.lo+b.hi)/2, b.accuracy]), color:"var(--edge)", dots:true, r:4}]}) +
+    `<p class="hint">Grey bars: how many people fall in each confidence band.</p></div></div>`;
+  const Q=M.questions;
+  const qcard = (title, q, note) => `<div class="card"><h4>${title}</h4><b>${pct(q.accuracy,1)}</b><p>correct when answered, and answered ${pct(q.answered_share)} of ${q.asked.toLocaleString()} times. ${note}</p></div>`;
+  s += `<h3>The three sales questions</h3><p class="lede">Asked automatically on every held-out company at the default cut-off and checked against the real chart. When the chart can’t support an answer the app says so instead of guessing; that counts as unanswered, not wrong.</p><div class="qs">`+
+    qcard("Who runs the &lt;function&gt; team?", Q.who_runs_function, "One question per function present.")+
+    qcard("Who runs the &lt;team&gt; team?", Q.who_runs_team, "Sub-teams such as analytics or enterprise sales.")+
+    qcard("Who does the head of &lt;function&gt; report to?", Q.reports_to, "Counted correct only if both the leader and their manager are right.")+
+    qcard("Economic buyer above &lt;name&gt;", Q.economic_buyer, "30 random non-executives per company; the buyer is the nearest leader at VP level or above.")+`</div>`;
+  const dims = Object.keys(M.breakdowns);
+  breakdownDim = breakdownDim || dims[0];
+  s += `<h3>Breakdowns</h3><p class="lede">Held-out companies at the default cut-off. Lines correct is over drawn lines; coverage is the share of people given a line.</p>`;
+  s += `<div class="seg" role="group" aria-label="Breakdown">${dims.map(dm=>`<button data-dim="${esc(dm)}" aria-pressed="${dm===breakdownDim}">${esc(dm)}</button>`).join("")}</div>`;
+  const rows = M.breakdowns[breakdownDim];
+  s += `<div class="tablewrap"><table class="data"><thead><tr><th>${esc(breakdownDim)}</th><th class="n">People</th><th class="n">Lines correct</th><th class="n">Coverage</th><th class="n">Roll-ups correct</th><th class="n">Unlinked</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr><td>${esc(r.group)}</td><td class="n">${r.people.toLocaleString()}</td><td class="n">${pct(r.precision,1)}</td><td class="n">${pct(r.coverage,1)}<span class="inbar" style="width:${Math.round((r.coverage||0)*60)}px"></span></td><td class="n">${pct(r.rollup_accuracy,1)}</td><td class="n">${pct(r.unlinked_share,1)}</td></tr>`).join("")+`</tbody></table></div>`;
+  const E=M.errors, maxE=Math.max(...E.map(e=>e.count)), totalWrong = E.reduce((a,e)=>a+e.count,0);
+  s += `<h3>What the wrong lines get wrong</h3><p class="lede">All ${totalWrong.toLocaleString()} wrong lines on held-out companies at the default cut-off, by how they miss. The number in brackets is how many involve a stale, vague, missing or misspelt title on the person or their real manager.</p><div class="err">`;
+  for (const e of E){
+    s += `<div>${esc(e.type)}</div><div class="bar" style="width:${(e.count/maxE*100).toFixed(1)}%"></div><div>${e.count} <span style="color:var(--muted)">(${e.with_title_mess})</span></div>`;
+    s += `<details class="ex"><summary>Examples</summary><div class="tablewrap" style="margin-top:6px"><table class="data"><thead><tr><th>Person’s title</th><th>Line drawn to</th><th>Real manager</th><th class="n">Confidence</th></tr></thead><tbody>${e.examples.map(x=>`<tr><td>${esc(x.title||"(none)")}</td><td>${esc(x.picked)}</td><td>${esc(x.real||"(no title)")}</td><td class="n">${pct(x.confidence)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
+  s += `</div>`;
+  s += `<h3>Why people are left unlinked</h3><div class="tablewrap" style="max-width:560px"><table class="data"><tbody>${Object.entries(M.unlinked).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v.toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`;
+  el.innerHTML = s;
+}
+
+// ---------------------------------------------------------------- data view
+let dataFilter = "", dataAll = false;
+function renderData(){
+  const Sm=META.summary, el=document.getElementById("dat");
+  let s = `<h2>The data</h2><p class="lede">There was no dataset, so one was generated: ${Sm.companies} companies and ${Sm.people.toLocaleString()} people, each company with a hidden real org chart. The model only sees what a sales database would hold: name, title, department, location and start date.</p>`;
+  s += `<div class="figs"><div class="fig"><b>${Sm.companies}</b><span>companies</span></div><div class="fig"><b>${Sm.people.toLocaleString()}</b><span>people</span></div>`+
+    `<div class="fig"><b>${Sm.sizes.min}–${Sm.sizes.max}</b><span>people per company (mean ${Sm.sizes.mean})</span></div><div class="fig"><b>${pct(Sm.people_with_mess/Sm.people)}</b><span>of records carry some mess</span></div></div>`;
+  s += `<h3>How the companies were generated</h3>`;
+  s += `<p>Each company draws an industry from twelve, a size band (45% at 100–140 people, 40% at 141–260, 15% at 261–450), one to four offices, and a messiness factor between 0.5 and 1.6 that scales how often its records are damaged. Industry sets the mix of functions: a biotech is mostly research, a manufacturer mostly operations, a SaaS company mostly engineering and sales.</p>`;
+  s += `<p>The CEO sits on top, sometimes with a chief of staff and an executive assistant. Each function gets a leader whose title depends on company size: a chief officer, SVP, VP, head or director. Some functions report to another function rather than the CEO, in proportions real companies show: data under the CTO half the time, security under the CTO or CIO, design under product, customer success under sales or operations, legal under finance. Inside a function, headcount is split into teams. Small teams get a manager; larger ones a director with several managers; very large functions get an extra layer of senior leaders. Managers are spread across offices and their reports usually share their office. Sales and support managers in multi-region companies own a region.</p>`;
+  s += `<p>Titles are written the way people write them: the team appears in only about half of individual titles, people managers and individual contributors can both have “manager” in their title, and sibling managers often share an identical title. Then the mess below is applied, and the rows are shuffled.</p>`;
+  s += `<div class="grid2"><div><h3>Industries</h3><div class="tablewrap"><table class="data"><tbody>${Object.entries(Sm.industries).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${v}</td></tr>`).join("")}</tbody></table></div></div>`;
+  s += `<div><h3>Seniority (true)</h3><div class="tablewrap"><table class="data"><tbody>${["CEO","C-level","SVP","VP","Director","Manager","IC-senior","IC","IC-junior","Exec support"].map(k=>`<tr><td>${k}</td><td class="n">${(Sm.levels[k]||0).toLocaleString()}</td></tr>`).join("")}</tbody></table></div></div></div>`;
+  s += `<h3>Counts of each kind of mess</h3><div class="tablewrap"><table class="data"><thead><tr><th>Kind of mess</th><th class="n">Records</th><th class="n">Share</th></tr></thead><tbody>${Sm.mess.map(m=>`<tr><td>${esc(m.label)}</td><td class="n">${m.count.toLocaleString()}</td><td class="n">${pct(m.share,1)}<span class="inbar" style="width:${Math.round(m.share*200)}px"></span></td></tr>`).join("")}</tbody></table></div>`;
+  const C=S.cur;
+  s += `<h3>Raw profiles: ${esc(S.meta.name)}</h3><p class="lede"><span class="legend-shade"></span>Shaded columns are the hidden truth. The model never sees them; they are used only for scoring. Pick another company on the Org charts tab.</p>`;
+  s += `<div class="filter"><input id="dfilter" type="search" placeholder="Filter by name, title, department" value="${esc(dataFilter)}" aria-label="Filter rows"><span id="dcount" style="color:var(--muted)"></span></div>`;
+  const f = dataFilter.toLowerCase();
+  const idx = [];
+  for (let i=0;i<C.rows.length;i++){ const r=C.rows[i]; if (!f || r.join(" ").toLowerCase().includes(f) || C.truth[i][4].toLowerCase().includes(f)) idx.push(i); }
+  const shown = dataAll ? idx : idx.slice(0,150);
+  s += `<div class="tablewrap"><table class="data"><thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Location</th><th>Start</th><th class="hid">Real manager</th><th class="hid">Function</th><th class="hid">Team</th><th class="hid">Level</th><th class="hid">Clean title</th><th class="hid">Mess applied</th></tr></thead><tbody>`+
+    shown.map(i=>{ const r=C.rows[i], t=C.truth[i]; return `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td>`+
+      `<td class="hid">${t[0]>=0?esc(C.rows[t[0]][0]):"–"}</td><td class="hid">${esc(t[1])}</td><td class="hid">${esc(t[2])}</td><td class="hid">${esc(t[3])}</td><td class="hid">${esc(t[4])}</td><td class="hid">${esc(t[5].split("|").join(", ").replace(/_/g," "))}</td></tr>`; }).join("")+
+    `</tbody></table></div>`;
+  if (idx.length > shown.length) s += `<p><button class="btn" id="dall">Show all ${idx.length} rows</button></p>`;
+  el.innerHTML = s;
+  document.getElementById("dcount").textContent = `${idx.length} of ${C.rows.length} rows`;
+  const inp = document.getElementById("dfilter");
+  inp.addEventListener("input", e => { dataFilter = e.target.value; const pos=e.target.selectionStart; renderData(); const n=document.getElementById("dfilter"); n.focus(); n.setSelectionRange(pos,pos); });
+  const all = document.getElementById("dall"); if (all) all.onclick = () => { dataAll = true; renderData(); };
+}
+
+// ---------------------------------------------------------------- views + events
+function setView(v, push=true){
+  S.view=v;
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.view===v));
+  for (const id of ["chart","accuracy","data"]) document.getElementById("view-"+id).hidden = id!==v;
+  if (v==="accuracy") renderAccuracy();
+  if (v==="data") renderData();
+  if (v==="chart"){ render(); if (!S.fitted){ fit(true); S.fitted=true; } }
+  if (push){ const tok = v==="chart" ? (S.meta?S.meta.id:"chart") : v; history.replaceState(null,"","#"+tok); }
+}
+function legend(){
+  const L = (svg, txt) => `<svg width="44" height="18" viewBox="0 0 44 18" aria-hidden="true">${svg}</svg><span>${txt}</span>`;
+  document.getElementById("legend").innerHTML =
+    L(`<line x1="2" y1="9" x2="42" y2="9" stroke="var(--edge)" stroke-width="4.8"/>`, "Direct report, high confidence") +
+    L(`<line x1="2" y1="9" x2="42" y2="9" stroke="var(--edge)" stroke-width="1.2"/>`, "Direct report, just above the cut-off") +
+    L(`<rect x="2" y="2" width="40" height="14" rx="3" fill="none" stroke="var(--rollup)" stroke-width="1.4" stroke-dasharray="5 4"/>`, "N people roll up here: their manager can’t be told apart, so they sit under the nearest leader every candidate shares") +
+    L(`<rect x="2" y="2" width="40" height="14" rx="3" fill="none" stroke="var(--unlinked)" stroke-width="1.4" stroke-dasharray="5 4"/>`, "Unlinked, grouped by reason under the CEO") +
+    L(`<line x1="2" y1="9" x2="20" y2="9" stroke="var(--ok)" stroke-width="3"/><line x1="24" y1="9" x2="42" y2="9" stroke="var(--bad)" stroke-width="3"/>`, "With truth on: right and wrong") +
+    `<span></span><span>Click anyone for how their record was read and why they sit there. ▾ collapses a branch.</span>`;
+}
+function setCut(gi){
+  S.gi=gi; document.getElementById("cut").value=gi; document.getElementById("cutv").textContent = pct(GRID[gi]);
+  document.getElementById("cut-hint").textContent = gi===DEFAULT_GI ? `Default: the lowest setting that gave 95% line precision on the training companies.` :
+    (gi>DEFAULT_GI ? `Stricter than the ${pct(GRID[DEFAULT_GI])} default: fewer lines, more of them right.` : `Looser than the ${pct(GRID[DEFAULT_GI])} default: more lines, more of them wrong.`);
+}
+function pickerSetup(){
+  const inp=document.getElementById("pick"), ul=document.getElementById("pick-list");
+  let items=[], act=0;
+  const show = () => {
+    const q=inp.value.toLowerCase().trim();
+    items = META.index.filter(c => !q || c.name.toLowerCase().includes(q) || c.industry.toLowerCase().includes(q) || c.id.toLowerCase()===q).sort((a,b)=>a.name.localeCompare(b.name));
+    act=0;
+    ul.innerHTML = `<li class="count" aria-hidden="true">${q ? `${items.length} of ${META.index.length} companies match` : `All ${META.index.length} companies, A to Z`}</li>` + (items.map((c,k)=>`<li role="option" data-id="${c.id}" aria-selected="${k===act}">${esc(c.name)} <small>${esc(c.industry)}, ${c.n}</small></li>`).join("") || `<li>No company matches</li>`);
+    ul.hidden=false;
+  };
+  inp.addEventListener("focus", ()=>{ inp.value=""; show(); });
+  inp.addEventListener("input", show);
+  inp.addEventListener("keydown", e => {
+    if (ul.hidden) return;
+    if (e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault(); act=Math.max(0,Math.min(items.length-1, act+(e.key==="ArrowDown"?1:-1)));
+      const opts=[...ul.querySelectorAll("li[data-id]")]; opts.forEach((li,k)=>li.setAttribute("aria-selected", k===act)); opts[act]?.scrollIntoView({block:"nearest"}); }
+    if (e.key==="Enter" && items[act]){ ul.hidden=true; inp.blur(); loadCompany(items[act].id); }
+    if (e.key==="Escape"){ ul.hidden=true; inp.blur(); }
+  });
+  ul.addEventListener("mousedown", e => { const li=e.target.closest("li[data-id]"); if (li){ e.preventDefault(); ul.hidden=true; inp.blur(); loadCompany(li.dataset.id); } });
+  inp.addEventListener("blur", ()=> setTimeout(()=>{ ul.hidden=true; if (S.meta) inp.value=S.meta.name; }, 120));
+}
+function events(){
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+  document.getElementById("cut").addEventListener("input", e => { setCut(+e.target.value); recompute(false); });
+  document.getElementById("truth").addEventListener("change", e => { S.truth=e.target.checked; render(); updateScore(); if (S.sel!=null) showPerson(S.sel,false); else if (S.selGroup) showGroup(S.selGroup); const q=document.getElementById("q").value; if (document.getElementById("answer").innerHTML && q) ask(q); });
+  document.getElementById("ask").onclick = () => ask(document.getElementById("q").value);
+  document.getElementById("q").addEventListener("keydown", e => { if (e.key==="Enter") ask(e.target.value); });
+  document.getElementById("chips").addEventListener("click", e => { const b=e.target.closest("button"); if (b){ document.getElementById("q").value=b.textContent; ask(b.textContent); } });
+  document.getElementById("expand").onclick = () => { S.collapsed.clear(); (function w(n){ S.openLists.add(nodeId(n)); n.kids.forEach(w); })(S.treeInfo.tree); render(); fit(); };
+  document.getElementById("collapse").onclick = () => recompute(true);
+  document.getElementById("fit").onclick = () => fit();
+  document.getElementById("vp").addEventListener("click", e => {
+    const tog=e.target.closest("[data-tog]");
+    if (tog){ const id=tog.dataset.tog; S.collapsed.has(id)?S.collapsed.delete(id):S.collapsed.add(id); render(); return; }
+    const more=e.target.closest("[data-more]"); if (more){ S.openLists.add(more.dataset.more); render(); return; }
+    const p=e.target.closest("[data-p]"); if (p){ showPerson(+p.dataset.p, true); return; }
+    const g=e.target.closest("[data-g]"); if (g){ const id=g.dataset.g; if (S.collapsed.has(id)) S.collapsed.delete(id); showGroup(id); }
+  });
+  const goto = e => { const go=e.target.closest("[data-goto]"); if (!go) return false; if (S.view!=="chart") setView("chart"); focusPerson(+go.dataset.goto); return true; };
+  document.addEventListener("click", e => {
+    if (goto(e)) return;
+    if (e.target.closest("[data-close]")){ closeDetail(); render(); return; }
+    const dim=e.target.closest("[data-dim]"); if (dim){ breakdownDim=dim.dataset.dim; renderAccuracy(); }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key==="Enter" && e.target.matches && e.target.matches("[data-goto]")) goto(e);
+    if (e.key==="Escape" && !document.getElementById("detail").hidden){ closeDetail(); render(); }
+  });
+  window.addEventListener("hashchange", routeFromHash);
+  window.addEventListener("resize", () => { clearTimeout(S.rt); S.rt=setTimeout(()=>{ if (S.view==="chart") fit(); }, 200); });
+}
+function routeFromHash(){
+  const tok = location.hash.slice(1);
+  if (tok==="accuracy"||tok==="data"){ setView(tok,false); return; }
+  if (/^C\d{3}$/.test(tok) && BLOBS[tok]){ if (S.view!=="chart") setView("chart",false); if (!S.cur || S.cur.id!==tok) loadCompany(tok); }
+}
+
+(async function init(){
+  try {
+    META = await gunzipB64(document.getElementById("meta").textContent.trim());
+    BLOBS = JSON.parse(document.getElementById("companies").textContent);
+  } catch(err){
+    document.getElementById("loading").textContent = "This browser can’t unpack the embedded data. Open the page in a current version of Chrome, Edge, Firefox or Safari.";
+    return;
+  }
+  GRID = META.grid; DEFAULT_GI = META.metrics.default_index;
+  document.getElementById("pick").placeholder = `Search ${META.index.length} companies`;
+  setCut(DEFAULT_GI); legend(); setupZoom(); pickerSetup(); events();
+  const tok = location.hash.slice(1);
+  const first = (/^C\d{3}$/.test(tok) && BLOBS[tok]) ? tok : (META.index.find(c=>c.split==="test" && c.n>150 && c.n<220)||META.index[0]).id;
+  if (tok==="accuracy"||tok==="data") S.view = tok;
+  await loadCompany(first);
+  setView(S.view, false);
+  S.fitted = S.view==="chart";
+})();
+</script>
+</body>
+</html>
